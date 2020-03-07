@@ -1263,10 +1263,27 @@ func (c *client) processLeafSub(argo []byte) (err error) {
 
 	acc := c.acc
 	// Check if we have a loop.
-	if string(sub.subject) == acc.getLds() {
-		c.mu.Unlock()
-		srv.reportLeafNodeLoop(c)
-		return nil
+	if strings.HasPrefix(string(sub.subject), leafNodeLoopDetectionSubjectPrefix) {
+		// There is a loop if we receive our own subscription back.
+		loopFound := string(sub.subject) == acc.getLds()
+		if !loopFound {
+			// OR if we observe a subscription a second time from another client.
+			// This indicates two separate paths to the same remote leaf node.
+			if res := acc.sl.Match(string(sub.subject)); res != nil {
+				for _, sub := range res.psubs {
+					if sub.client.cid != c.cid {
+						loopFound = true
+						break
+					}
+				}
+			}
+		}
+
+		if loopFound {
+			c.mu.Unlock()
+			srv.reportLeafNodeLoop(c)
+			return nil
+		}
 	}
 
 	// Check permissions if applicable.
